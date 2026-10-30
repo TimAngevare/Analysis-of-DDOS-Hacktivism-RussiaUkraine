@@ -1,5 +1,7 @@
 # Russia–Ukraine Hacktivism dashboard
 
+## *The dashboard was entirely generated using AI*
+
 An interactive view over the DDoS attack graph built in `../analysis.ipynb`, focused on
 hacktivist activity in the Russia–Ukraine war.
 
