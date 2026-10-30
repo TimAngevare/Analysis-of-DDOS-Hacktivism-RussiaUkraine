@@ -1,0 +1,1290 @@
+<title>Russia-Ukraine Hacktivism</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+
+<style>
+/* Layout: sticky filter bar, then four bands - the map, the Russia/Ukraine
+   comparison, the actor roster, and the event browser. One column under 900px.
+   Colour carries side (Russia-aligned / Ukraine-aligned / neither) and nothing else;
+   the hacktivist-vs-state distinction is carried by a text badge. */
+:root {
+  color-scheme: light;
+  --plane:        #f9f9f7;
+  --surface:      #fcfcfb;
+  --surface-sunk: #f2f2ee;
+  --ink:          #0b0b0b;
+  --ink-2:        #52514e;
+  --ink-muted:    #898781;
+  --rule:         #e1e0d9;
+  --axis:         #c3c2b7;
+  --ring:         rgba(11,11,11,0.10);
+  --ua:           #2a78d6;   /* Ukraine-aligned */
+  --ru:           #eb6834;   /* Russia-aligned */
+  --neutral:      #898781;   /* neither side */
+  --critical:     #d03b3b;
+  --land:         #eceae3;
+  /* choropleth: light = few, dark = many, in both themes */
+  --seq-1:#cde2fb; --seq-2:#9ec5f4; --seq-3:#5598e7;
+  --seq-4:#2a78d6; --seq-5:#1c5cab; --seq-6:#0d366b;
+  --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --plane: #0d0d0d; --surface: #1a1a19; --surface-sunk: #232321;
+    --ink: #f0efec; --ink-2: #c3c2b7; --ink-muted: #898781;
+    --rule: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --ua: #3987e5; --ru: #e8703f; --neutral: #898781; --critical: #e66767;
+    --land: #2a2a28;
+    --seq-1:#b9c9db; --seq-2:#8fa9c6; --seq-3:#6b8bb3;
+    --seq-4:#47699d; --seq-5:#2a4c85; --seq-6:#12356b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane: #0d0d0d; --surface: #1a1a19; --surface-sunk: #232321;
+  --ink: #f0efec; --ink-2: #c3c2b7; --ink-muted: #898781;
+  --rule: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --ua: #3987e5; --ru: #e8703f; --neutral: #898781; --critical: #e66767;
+  --land: #2a2a28;
+  --seq-1:#b9c9db; --seq-2:#8fa9c6; --seq-3:#6b8bb3;
+  --seq-4:#47699d; --seq-5:#2a4c85; --seq-6:#12356b;
+}
+
+* { box-sizing: border-box }
+body {
+  margin: 0; background: var(--plane); color: var(--ink);
+  font-family: var(--sans); font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px); z-index: 20; background: var(--surface);
+}
+.wrap {
+  max-width: 1340px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600 }
+a { color: var(--ua) }
+
+header.top { background: var(--surface); border-bottom: 1px solid var(--rule) }
+.top .wrap { padding-block: 18px 16px }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-muted); margin-bottom: 6px;
+}
+h1 { font-size: clamp(24px, 4vw, 34px); letter-spacing: -.02em; font-weight: 700 }
+.lede { color: var(--ink-2); max-width: 68ch; margin-top: 6px }
+
+.tiles { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px }
+.tile {
+  flex: 1 1 128px; min-width: 0; background: var(--surface-sunk);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 9px 11px;
+}
+.tile.ru { box-shadow: inset 3px 0 0 var(--ru) }
+.tile.ua { box-shadow: inset 3px 0 0 var(--ua) }
+.tile .v { font-family: var(--mono); font-size: 21px; font-weight: 600; letter-spacing: -.02em }
+.tile .k {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-muted); margin-top: 1px;
+}
+
+.filters {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 12;
+  background: var(--surface); border-bottom: 1px solid var(--rule);
+}
+.filters .wrap {
+  padding-block: 10px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end;
+}
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+.field > label, .seg-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+select, input[type="search"] {
+  font: 500 13px/1.3 var(--sans); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--axis); border-radius: 3px; padding: 5px 7px; max-width: 100%;
+}
+select { max-width: 210px }
+input[type="search"] { width: 150px }
+.seg { display: flex; border: 1px solid var(--axis); border-radius: 3px; overflow: hidden }
+.seg button {
+  font: 500 12px/1 var(--sans); color: var(--ink-2); background: var(--surface);
+  border: 0; border-right: 1px solid var(--axis); padding: 7px 10px; cursor: pointer;
+  white-space: nowrap;
+}
+.seg button:last-child { border-right: 0 }
+.seg button[aria-pressed="true"] { background: var(--ua); color: #fff }
+.ghost {
+  font: 500 12px/1 var(--sans); color: var(--ink-2); background: transparent;
+  border: 1px solid var(--axis); border-radius: 3px; padding: 7px 10px; cursor: pointer;
+}
+.ghost:hover { background: var(--surface-sunk) }
+.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2) }
+.check input { accent-color: var(--ua) }
+:is(button, select, input, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--ru); outline-offset: 1px;
+}
+
+main .wrap { padding-block: 16px 28px; display: flex; flex-direction: column; gap: 16px }
+.panel {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 14px 16px 16px; min-width: 0;
+}
+.phead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 10px }
+.phead h2 { font-size: 15px; letter-spacing: -.01em }
+.phead .note { font-size: 12px; color: var(--ink-muted) }
+.grid-map { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 16px }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px }
+.grid-actor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 16px }
+@media (max-width: 900px) {
+  .grid-map, .grid-2, .grid-actor { grid-template-columns: minmax(0, 1fr) }
+}
+
+svg { display: block; width: 100%; height: auto; max-width: 100% }
+svg text { font-family: var(--mono); font-size: 10px; fill: var(--ink-muted) }
+.geo-land { fill: var(--land); stroke: var(--surface); stroke-width: .4 }
+.geo-val { stroke: var(--surface); stroke-width: .5; cursor: pointer }
+.geo-val:hover, .geo-sel { stroke: var(--ink); stroke-width: 1.2 }
+.sphere { fill: none; stroke: var(--axis); stroke-width: .6 }
+.grat { fill: none; stroke: var(--axis); stroke-width: .3; opacity: .5 }
+.arc { fill: none; stroke-linecap: round; opacity: .6 }
+.arc:hover { opacity: 1 }
+.hub { stroke: var(--surface); stroke-width: 1; fill-opacity: .75 }
+.bar { cursor: pointer }
+.bar:hover { opacity: .78 }
+.gridline { stroke: var(--rule); stroke-width: 1; shape-rendering: crispEdges }
+.axisline { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges }
+.warline { stroke: var(--critical); stroke-width: 1.5; stroke-dasharray: 3 3 }
+.lbl-out { fill: var(--ink-2); font-weight: 500 }
+
+.rank { display: flex; flex-direction: column; gap: 1px }
+.rank-row {
+  position: relative; display: grid; grid-template-columns: 1fr auto;
+  gap: 8px; align-items: center; padding: 4px 6px; border-radius: 2px;
+  cursor: pointer; overflow: hidden; min-width: 0;
+}
+.rank-row:hover { background: var(--surface-sunk) }
+.rank-row[aria-selected="true"] { background: var(--surface-sunk); box-shadow: inset 2px 0 0 var(--ua) }
+.rank-row .fill { position: absolute; inset: 0 auto 0 0; background: var(--seq-2); opacity: .45; z-index: 0 }
+.rank-row .nm, .rank-row .ct { position: relative; z-index: 1; min-width: 0 }
+.rank-row .nm { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.rank-row .ct { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin-top: 8px }
+.legend span { font-size: 11.5px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 5px }
+.legend .sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block }
+.ramp { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-muted) }
+.ramp .steps { display: flex }
+.ramp .steps i { width: 20px; height: 9px; display: block }
+
+.tbl-scroll { overflow-x: auto }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--rule); vertical-align: top }
+th {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-muted); font-weight: 500; white-space: nowrap;
+}
+th.sortable { cursor: pointer; user-select: none }
+th.sortable:hover { color: var(--ink) }
+th[aria-sort] { color: var(--ua) }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap }
+td.date { font-family: var(--mono); white-space: nowrap; color: var(--ink-2) }
+tbody tr.row:hover { background: var(--surface-sunk) }
+tbody tr.row { cursor: pointer }
+tr.detail > td { background: var(--surface-sunk); font-size: 12px }
+.dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px 18px }
+.dl div { min-width: 0 }
+.dl dt {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.dl dd { margin: 0; overflow-wrap: anywhere }
+
+.chip {
+  display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 1px 5px;
+  border: 1px solid var(--ring); border-radius: 2px; color: var(--ink-2);
+  background: var(--surface-sunk); margin: 0 3px 2px 0; cursor: pointer;
+}
+.chip:hover { border-color: var(--ua); color: var(--ua) }
+.chip.ru { border-color: var(--ru); color: var(--ru) }
+.chip.ua { border-color: var(--ua); color: var(--ua) }
+.src {
+  font-family: var(--mono); font-size: 10px; padding: 1px 4px; border-radius: 2px;
+  background: var(--surface-sunk); color: var(--ink-muted); border: 1px solid var(--ring);
+  white-space: nowrap;
+}
+.src.wd { color: var(--ua); border-color: var(--ua) }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none }
+
+.profile { display: flex; flex-direction: column; gap: 10px }
+.profile .pname { font-size: 17px; font-weight: 700; letter-spacing: -.01em }
+.profile .palign { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2) }
+.profile .pnote { font-size: 12.5px; color: var(--ink-2); border-left: 2px solid var(--rule); padding-left: 9px }
+.profile .pstats { display: flex; flex-wrap: wrap; gap: 8px }
+.profile .pstats > div { flex: 1 1 78px; background: var(--surface-sunk); border-radius: 3px; padding: 6px 8px }
+.profile .pstats .v { font-family: var(--mono); font-size: 16px; font-weight: 600 }
+.profile .pstats .k {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.mini { display: flex; flex-direction: column; gap: 3px }
+.mini-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; align-items: center }
+.mini-row .b { height: 5px; border-radius: 2px; background: var(--ua) }
+.ego-node { stroke: var(--surface); stroke-width: 1.5; cursor: pointer }
+.ego-link { stroke: var(--axis); stroke-opacity: .55 }
+.ego-lbl { fill: var(--ink-2); font-family: var(--sans); font-size: 10px; pointer-events: none }
+
+.empty {
+  color: var(--ink-muted); font-size: 13px; border: 1px dashed var(--axis);
+  border-radius: 3px; padding: 18px; text-align: center;
+}
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12px; color: var(--ink-2) }
+#tip {
+  position: fixed; z-index: 40; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--ring);
+  border-radius: 3px; padding: 7px 9px; font-size: 12px; max-width: 270px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+}
+#tip .r { font-family: var(--mono); color: var(--ink-2); font-size: 11.5px }
+
+footer { border-top: 1px solid var(--rule); background: var(--surface) }
+footer .wrap { padding-block: 16px 22px; color: var(--ink-muted); font-size: 12px }
+footer p { margin: 0 0 7px; max-width: 86ch }
+footer b { color: var(--ink-2) }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">Hacktivism research · 12,318 news stories · Sep 2015 – Oct 2026</div>
+    <h1>Russia&ndash;Ukraine Hacktivism</h1>
+    <p class="lede">
+      DDoS attack events extracted from cybersecurity news, clustered by target and date, and
+      coded by which side of the war the attacking collective fights for. The view opens on the
+      period since the full-scale invasion of 24 February 2022.
+    </p>
+    <div class="tiles" id="tiles">
+      <div class="tile"><div class="v">&mdash;</div><div class="k">Attack events</div></div>
+      <div class="tile ru"><div class="v">&mdash;</div><div class="k">Russia-aligned</div></div>
+      <div class="tile ua"><div class="v">&mdash;</div><div class="k">Ukraine-aligned</div></div>
+      <div class="tile"><div class="v">&mdash;</div><div class="k">Named actors</div></div>
+      <div class="tile"><div class="v">&mdash;</div><div class="k">Victim countries</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="filters">
+  <div class="wrap">
+    <div class="field">
+      <span class="seg-label">Period</span>
+      <div class="seg" id="phase" role="group" aria-label="War phase">
+        <button data-phase="war" aria-pressed="true">Since the invasion</button>
+        <button data-phase="pre" aria-pressed="false">Before</button>
+        <button data-phase="all" aria-pressed="false">All years</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="align">Actor side</label>
+      <select id="align">
+        <option value="">All actors</option>
+        <option value="hacktivist">Hacktivist collectives only</option>
+        <option value="ru">Russia-aligned (any)</option>
+        <option value="ua">Ukraine-aligned (any)</option>
+        <option value="named">Any named actor</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="sector">Victim sector</label>
+      <select id="sector"><option value="">All sectors</option></select>
+    </div>
+    <div class="field">
+      <label for="actor">Actor</label>
+      <select id="actor"><option value="">All actors</option></select>
+    </div>
+    <div class="field">
+      <label for="q">Search victim or actor</label>
+      <input type="search" id="q" placeholder="Aeroflot, Killnet…" autocomplete="off">
+    </div>
+    <label class="check" for="wd">
+      <input type="checkbox" id="wd">
+      Wikidata-verified victim countries only
+    </label>
+    <button class="ghost" id="reset" type="button">Reset</button>
+  </div>
+</div>
+
+<main>
+  <div class="wrap">
+
+    <section class="panel">
+      <div class="phead">
+        <h2 id="map-title">Where the victims are</h2>
+        <span class="note" id="map-note">Attack events by victim country</span>
+        <div class="seg" id="mode" role="group" aria-label="Map mode" style="margin-left:auto">
+          <button data-mode="victims" aria-pressed="true">Victims</button>
+          <button data-mode="attackers" aria-pressed="false">Attackers</button>
+          <button data-mode="flows" aria-pressed="false">Flows</button>
+        </div>
+      </div>
+      <div class="grid-map">
+        <div style="min-width:0">
+          <svg id="map" viewBox="0 0 960 440" role="img" aria-label="World map of attack events"></svg>
+          <div class="legend" id="map-legend"></div>
+        </div>
+        <div style="min-width:0">
+          <div class="phead" style="margin-bottom:6px"><h2 style="font-size:13px" id="rank-title">Top countries</h2></div>
+          <div class="rank" id="rank"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="phead">
+        <h2>Russia and Ukraine, sector by sector</h2>
+        <span class="note" id="seg-note"></span>
+        <div class="seg" id="segmode" role="group" aria-label="Comparison measure" style="margin-left:auto">
+          <button data-seg="count" aria-pressed="true">Events</button>
+          <button data-seg="share" aria-pressed="false">Share of country</button>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div style="min-width:0">
+          <svg id="segchart" viewBox="0 0 600 300" role="img"
+               aria-label="Attack events by sector, Russian versus Ukrainian victims"></svg>
+          <div class="legend">
+            <span><span class="sw" style="background:var(--ru)"></span>Russian victims</span>
+            <span><span class="sw" style="background:var(--ua)"></span>Ukrainian victims</span>
+            <span style="color:var(--ink-muted)">click a sector to filter everything below</span>
+          </div>
+        </div>
+        <div style="min-width:0">
+          <div class="tbl-scroll"><table id="segtable">
+            <thead><tr>
+              <th>Sector</th><th class="num">Russia</th><th class="num">Ukraine</th>
+              <th class="num">Skew</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="phead">
+        <h2>Attacks per month, by side</h2>
+        <span class="note">Dashed line marks 24 February 2022</span>
+      </div>
+      <svg id="time" viewBox="0 0 960 240" role="img"
+           aria-label="Attack events per month by attacker side"></svg>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--ru)"></span>Russia-aligned actors</span>
+        <span><span class="sw" style="background:var(--ua)"></span>Ukraine-aligned actors</span>
+        <span><span class="sw" style="background:var(--neutral)"></span>Unaligned or unattributed</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="phead">
+        <h2>Who is attacking</h2>
+        <span class="note">Click an actor for its profile</span>
+      </div>
+      <div class="grid-actor">
+        <div style="min-width:0">
+          <svg id="actors" viewBox="0 0 600 300" role="img" aria-label="Attack events by actor"></svg>
+        </div>
+        <div style="min-width:0">
+          <div class="profile" id="profile"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="phead">
+        <h2 id="browse-title">Attack events</h2>
+        <span class="note" id="browse-note">Click a row to open the full record</span>
+      </div>
+      <div class="grid-2" style="margin-bottom:12px">
+        <div style="min-width:0">
+          <svg id="egograph" viewBox="0 0 460 300" role="img" aria-label="Actor and target graph"></svg>
+        </div>
+        <div style="min-width:0">
+          <div class="mini" id="egokey"></div>
+        </div>
+      </div>
+      <div class="tbl-scroll"><table id="events">
+        <thead><tr>
+          <th class="sortable" data-sort="f">Date</th>
+          <th class="sortable" data-sort="tn">Target</th>
+          <th class="sortable" data-sort="vc">Country</th>
+          <th class="sortable" data-sort="sec">Sector</th>
+          <th>Actors</th>
+          <th class="sortable num" data-sort="n">Stories</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="pager">
+        <button class="ghost" id="prev" type="button">Previous</button>
+        <span id="pageinfo"></span>
+        <button class="ghost" id="next" type="button">Next</button>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <b>What one row is.</b> A row in the source data is one news story, so stories about the same
+      target within a week are clustered into one attack event. 7,076 events, of which 2,566 name
+      an actor; the rest have a target but nobody attributed to it. Counting events rather than
+      articles stops a heavily covered attack outweighing a hundred quiet ones.
+    </p>
+    <p>
+      <b>Side is hand-coded, not extracted.</b> Each named collective is coded Russia-aligned,
+      Ukraine-aligned, state-linked, criminal or unaligned in <code>dashboard/actors.py</code>, from
+      public reporting and the groups' own channels, with the reason recorded next to each entry.
+      Spelling variants are merged (<i>NoName</i>, <i>NoName057</i>, <i>DDoSia</i> all become
+      NoName057(16)), and mentions of techniques, nationalities and news outlets that the extractor
+      labelled as groups (<i>DDoS</i>, <i>pro-Russian hackers</i>, <i>GBHackers</i>) are dropped
+      rather than drawn as actors. Dropping bare <i>pro-Russian hackers</i> means the
+      Russia-aligned totals here are conservative.
+    </p>
+    <p>
+      <b>Country attribution is the weak link.</b> The extraction gives locations per story, not per
+      entity, so a victim's country is the one it co-occurs with most across its coverage &mdash; a
+      US newspaper reporting on Moscow can come out tagged Russia. Countries from Wikidata
+      <span class="src wd">P17</span> are the sound ones and are badged as such; the toggle above
+      restricts the whole dashboard to them. Attacker countries have no such source, so the
+      attacker map is coverage geography and the side coding is the better guide to who did it.
+    </p>
+  </div>
+</footer>
+
+<div id="tip" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const fmt = d3.format(',');
+const pct = d3.format('.0%');
+const tip = $('#tip');
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const SEQ_VARS = ['--seq-1','--seq-2','--seq-3','--seq-4','--seq-5','--seq-6'];
+let SEQ = SEQ_VARS.map(css);
+
+const NAME_FIX = { 'United States': 'United States of America', 'Czech Republic': 'Czechia' };
+const EXTRA_POINTS = {
+  'Malta': [14.45, 35.9], 'Singapore': [103.82, 1.35],
+  'Andorra': [1.52, 42.5], 'Liechtenstein': [9.55, 47.17],
+};
+const RU_SIDE = new Set(['pro-Russian hacktivist', 'Russian state-linked']);
+const UA_SIDE = new Set(['pro-Ukrainian hacktivist', 'Ukrainian state-linked']);
+const HACKTIVIST = new Set(['pro-Russian hacktivist', 'pro-Ukrainian hacktivist']);
+const PAGE = 25;
+
+const state = {
+  mode: 'victims', phase: 'war', align: '', sector: '', actor: '', country: '',
+  wdOnly: false, q: '', seg: 'count', sel: null, page: 0,
+  sort: { key: 'f', dir: -1 }, open: null,
+};
+
+let DATA = null, GEO = null, centroid = {}, actorBy = new Map(), targetBy = new Map();
+
+function sideOf(aligns) {
+  const ru = aligns.some((a) => RU_SIDE.has(a));
+  const ua = aligns.some((a) => UA_SIDE.has(a));
+  if (ru && !ua) return 'ru';
+  if (ua && !ru) return 'ua';
+  return 'none';
+}
+const sideColour = (s) => css(s === 'ru' ? '--ru' : s === 'ua' ? '--ua' : '--neutral');
+
+function showTip(html, event) {
+  tip.innerHTML = html;
+  tip.style.opacity = 1;
+  const pad = 14, r = tip.getBoundingClientRect();
+  let x = event.clientX + pad, y = event.clientY + pad;
+  if (x + r.width > innerWidth - 8) x = event.clientX - r.width - pad;
+  if (y + r.height > innerHeight - 8) y = event.clientY - r.height - pad;
+  tip.style.left = Math.max(8, x) + 'px';
+  tip.style.top = Math.max(8, y) + 'px';
+}
+const hideTip = () => { tip.style.opacity = 0; };
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- load -------------------------------------------------------- */
+Promise.all([
+  fetch('dashboard.json').then((r) => r.json()),
+  fetch('countries-110m.json').then((r) => r.json()),
+]).then(([data, topo]) => {
+  DATA = data;
+  GEO = topojson.feature(topo, topo.objects.countries);
+  GEO.features.forEach((f) => { centroid[f.properties.name] = d3.geoCentroid(f); });
+  for (const [n, p] of Object.entries(EXTRA_POINTS)) centroid[n] = p;
+
+  data.actors.forEach((a) => actorBy.set(a.n, a));
+  data.targets.forEach((t) => targetBy.set(t.l + '\u0000' + t.n, t));
+  data.events.forEach((e) => {
+    e.yr = +e.f.slice(0, 4);
+    e.side = sideOf(e.al);
+    e.gc = e.g.map((g) => (actorBy.get(g) || {}).c).filter(Boolean);
+  });
+
+  buildOptions();
+  wire();
+  render();
+}).catch((err) => {
+  $('#map').insertAdjacentHTML('afterend',
+    `<p class="empty">Could not load the graph data. ${esc(err)}</p>`);
+});
+
+function tally(events, pick) {
+  const m = new Map();
+  for (const e of events) for (const k of pick(e)) if (k) m.set(k, (m.get(k) || 0) + 1);
+  return [...m].sort((a, b) => b[1] - a[1] || d3.ascending(a[0], b[0]));
+}
+
+function buildOptions() {
+  const sectors = tally(DATA.events, (e) => [e.sec]);
+  $('#sector').innerHTML = '<option value="">All sectors</option>' +
+    sectors.map(([k, v]) => `<option value="${esc(k)}">${esc(k)} (${fmt(v)})</option>`).join('');
+
+  // Actors grouped by side, so picking one is a research decision not a scroll.
+  const counts = new Map(tally(DATA.events, (e) => e.g));
+  const groups = [
+    ['Russia-aligned', (a) => RU_SIDE.has(a.al)],
+    ['Ukraine-aligned', (a) => UA_SIDE.has(a.al)],
+    ['Criminal', (a) => a.al === 'criminal'],
+    ['Unaligned', (a) => a.al === 'unaligned'],
+  ];
+  $('#actor').innerHTML = '<option value="">All actors</option>' + groups.map(([label, test]) => {
+    const rows = DATA.actors.filter(test)
+      .map((a) => [a.n, counts.get(a.n) || 0])
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1] || d3.ascending(a[0], b[0]))
+      .slice(0, 60);
+    if (!rows.length) return '';
+    return `<optgroup label="${label}">` + rows.map(([n, v]) =>
+      `<option value="${esc(n)}">${esc(n)} (${fmt(v)})</option>`).join('') + '</optgroup>';
+  }).join('');
+}
+
+/* ---------- filtering --------------------------------------------------- */
+function filtered() {
+  const q = state.q.trim().toLowerCase();
+  return DATA.events.filter((e) => {
+    if (state.phase === 'war' && !e.war) return false;
+    if (state.phase === 'pre' && e.war) return false;
+    if (state.sector && e.sec !== state.sector) return false;
+    if (state.actor && !e.g.includes(state.actor)) return false;
+    if (state.wdOnly && e.vcs !== 'wikidata') return false;
+    if (state.align === 'named' && !e.g.length) return false;
+    if (state.align === 'hacktivist' && !e.al.some((a) => HACKTIVIST.has(a))) return false;
+    if (state.align === 'ru' && e.side !== 'ru') return false;
+    if (state.align === 'ua' && e.side !== 'ua') return false;
+    if (state.country && e.vc !== state.country && !e.gc.includes(state.country)) return false;
+    if (q && !(e.tn.toLowerCase().includes(q) || e.g.some((g) => g.toLowerCase().includes(q))))
+      return false;
+    return true;
+  });
+}
+
+function render() {
+  const events = filtered();
+  renderTiles(events);
+  renderMap(events);
+  renderSegment(events);
+  renderTime(events);
+  renderActors(events);
+  renderBrowser(events);
+}
+
+function renderTiles(events) {
+  const actorSet = new Set(), countries = new Set();
+  let ru = 0, ua = 0;
+  for (const e of events) {
+    e.g.forEach((g) => actorSet.add(g));
+    if (e.vc) countries.add(e.vc);
+    if (e.side === 'ru') ru++;
+    if (e.side === 'ua') ua++;
+  }
+  const cells = [
+    [fmt(events.length), 'Attack events', ''],
+    [fmt(ru), 'Russia-aligned', 'ru'],
+    [fmt(ua), 'Ukraine-aligned', 'ua'],
+    [fmt(actorSet.size), 'Named actors', ''],
+    [fmt(countries.size), 'Victim countries', ''],
+  ];
+  $('#tiles').innerHTML = cells.map(([v, k, cls]) =>
+    `<div class="tile ${cls}"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+}
+
+/* ---------- map --------------------------------------------------------- */
+const W = 960, H = 440;
+const projection = d3.geoNaturalEarth1().fitExtent([[6, 8], [W - 6, H - 8]], { type: 'Sphere' });
+const path = d3.geoPath(projection);
+const dataName = (f) => {
+  const n = f.properties.name;
+  for (const [k, v] of Object.entries(NAME_FIX)) if (v === n) return k;
+  return n;
+};
+
+function flowCounts(events) {
+  const m = new Map();
+  for (const e of events) {
+    if (!e.vc) continue;
+    for (const c of new Set(e.gc)) {
+      if (c === e.vc) continue;
+      m.set(c + ' → ' + e.vc, (m.get(c + ' → ' + e.vc) || 0) + 1);
+    }
+  }
+  return [...m].sort((a, b) => b[1] - a[1]);
+}
+
+function renderMap(events) {
+  const svg = d3.select('#map');
+  svg.selectAll('*').remove();
+  const flows = state.mode === 'flows';
+  const counts = state.mode === 'attackers'
+    ? tally(events, (e) => e.gc)
+    : tally(events, (e) => [e.vc]);
+  const byCountry = new Map(counts);
+  const max = d3.max(counts, (d) => d[1]) || 1;
+
+  const titles = {
+    victims: ['Where the victims are', 'Attack events by victim country, darkest is most'],
+    attackers: ['Where the attacks are reported from',
+                'By the country the actor co-occurs with &mdash; coverage geography, not geolocation'],
+    flows: ['Who attacks whom', 'Cross-border arcs, attacker country to victim country'],
+  };
+  $('#map-title').textContent = titles[state.mode][0];
+  $('#map-note').innerHTML = titles[state.mode][1];
+  $('#rank-title').textContent = flows ? 'Top country pairs' : 'Top countries';
+
+  const scale = d3.scaleQuantile().domain(counts.map((d) => d[1])).range(SEQ);
+  const fillFor = (n) => (byCountry.get(n) ? scale(byCountry.get(n)) : null);
+
+  svg.append('path').attr('class', 'sphere').attr('d', path({ type: 'Sphere' }));
+  svg.append('path').attr('class', 'grat').attr('d', path(d3.geoGraticule10()));
+  svg.append('g').selectAll('path').data(GEO.features).join('path')
+    .attr('class', (f) => (fillFor(dataName(f)) ? 'geo-val' : 'geo-land'))
+    .classed('geo-sel', (f) => !flows && dataName(f) === state.country)
+    .attr('fill', (f) => fillFor(dataName(f)) || css('--land'))
+    .attr('d', path)
+    .on('pointermove', (ev, f) => {
+      const n = dataName(f), v = byCountry.get(n);
+      showTip(`<b>${esc(n)}</b><br><span class="r">${
+        v ? fmt(v) + ' attack events' : 'no events in this view'}</span>`, ev);
+    })
+    .on('pointerleave', hideTip)
+    .on('click', (ev, f) => { if (byCountry.get(dataName(f))) pickCountry(dataName(f)); });
+
+  if (flows) {
+    const pairs = flowCounts(events).slice(0, 45)
+      .filter(([k]) => { const [a, b] = k.split(' → '); return centroid[a] && centroid[b]; });
+    const wmax = d3.max(pairs, (d) => d[1]) || 1;
+    const width = d3.scaleSqrt().domain([1, wmax]).range([0.8, 9]);
+    const hub = new Map();
+    for (const [k, v] of pairs) {
+      const [a, b] = k.split(' → ');
+      hub.set(a, (hub.get(a) || 0) + v);
+      hub.set(b, (hub.get(b) || 0) + v);
+    }
+    // An arc takes the colour of the side its origin country sits on.
+    const originSide = (c) => (c === 'Russia' ? 'ru' : c === 'Ukraine' ? 'ua' : 'none');
+    svg.append('g').selectAll('path').data(pairs).join('path')
+      .attr('class', 'arc')
+      .attr('stroke', (d) => sideColour(originSide(d[0].split(' → ')[0])))
+      .attr('stroke-width', (d) => width(d[1]))
+      .attr('d', (d) => {
+        const [a, b] = d[0].split(' → ');
+        return arcPath(projection(centroid[a]), projection(centroid[b]));
+      })
+      .on('pointermove', (ev, d) => showTip(
+        `<b>${esc(d[0])}</b><br><span class="r">${fmt(d[1])} attack events</span>`, ev))
+      .on('pointerleave', hideTip);
+
+    const r = d3.scaleSqrt().domain([1, d3.max([...hub.values()]) || 1]).range([2, 13]);
+    svg.append('g').selectAll('circle')
+      .data([...hub].filter(([n]) => centroid[n]).sort((a, b) => b[1] - a[1])).join('circle')
+      .attr('class', 'hub')
+      .attr('fill', (d) => sideColour(originSide(d[0])))
+      .attr('cx', (d) => projection(centroid[d[0]])[0])
+      .attr('cy', (d) => projection(centroid[d[0]])[1])
+      .attr('r', (d) => r(d[1]))
+      .style('cursor', 'pointer')
+      .on('pointermove', (ev, d) => showTip(
+        `<b>${esc(d[0])}</b><br><span class="r">${fmt(d[1])} events on an arc</span>`, ev))
+      .on('pointerleave', hideTip)
+      .on('click', (ev, d) => pickCountry(d[0]));
+
+    $('#map-legend').innerHTML =
+      `<span><span class="sw" style="background:var(--ru)"></span>from Russia</span>` +
+      `<span><span class="sw" style="background:var(--ua)"></span>from Ukraine</span>` +
+      `<span><span class="sw" style="background:var(--neutral)"></span>from elsewhere</span>` +
+      `<span style="color:var(--ink-muted)">thickness = events, thickest ${fmt(wmax)}</span>`;
+    renderRank(flowCounts(events).slice(0, 14), null);
+  } else {
+    const bounds = [1, ...scale.quantiles().map(Math.round), max];
+    $('#map-legend').innerHTML =
+      '<div class="ramp"><span>few</span><span class="steps">' +
+      SEQ.map((c) => `<i style="background:${c}"></i>`).join('') +
+      `</span><span>many &middot; up to ${fmt(max)}</span></div>` +
+      `<span style="font-size:11px;color:var(--ink-muted)">equal-count bands: ${
+        bounds.map(fmt).join(' · ')}</span>`;
+    renderRank(counts.slice(0, 14), state.country);
+  }
+}
+function arcPath(a, b) {
+  if (!a || !b) return null;
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const dr = Math.hypot(dx, dy) * 1.1;
+  return `M${a[0]},${a[1]}A${dr},${dr} 0 0,${dx > 0 ? 1 : 0} ${b[0]},${b[1]}`;
+}
+function renderRank(rows, selected) {
+  const max = d3.max(rows, (d) => d[1]) || 1;
+  $('#rank').innerHTML = rows.map(([k, v]) => `
+    <div class="rank-row" role="button" tabindex="0" data-k="${esc(k)}"
+         ${selected === k ? 'aria-selected="true"' : ''}>
+      <span class="fill" style="width:${(100 * v / max).toFixed(1)}%"></span>
+      <span class="nm" title="${esc(k)}">${esc(k)}</span><span class="ct">${fmt(v)}</span>
+    </div>`).join('') || '<p class="empty">Nothing in this selection.</p>';
+  $('#rank').querySelectorAll('.rank-row').forEach((el) => {
+    const go = () => {
+      const k = el.dataset.k;
+      pickCountry(k.includes('→') ? k.split(' → ')[1] : k);
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); }
+    });
+  });
+}
+function pickCountry(name) {
+  state.country = state.country === name ? '' : name;
+  state.sel = state.country ? { kind: 'Country', name } : null;
+  state.page = 0;
+  render();
+}
+
+/* ---------- Russia vs Ukraine by sector --------------------------------- */
+function segmentRows(events) {
+  const ru = new Map(), ua = new Map();
+  for (const e of events) {
+    if (!e.sec) continue;
+    if (e.vc === 'Russia') ru.set(e.sec, (ru.get(e.sec) || 0) + 1);
+    else if (e.vc === 'Ukraine') ua.set(e.sec, (ua.get(e.sec) || 0) + 1);
+  }
+  const sectors = [...new Set([...ru.keys(), ...ua.keys()])];
+  const ruTotal = d3.sum(ru.values()) || 1, uaTotal = d3.sum(ua.values()) || 1;
+  return {
+    ruTotal: d3.sum(ru.values()), uaTotal: d3.sum(ua.values()),
+    rows: sectors.map((s) => ({
+      sector: s, ru: ru.get(s) || 0, ua: ua.get(s) || 0,
+      ruShare: (ru.get(s) || 0) / ruTotal, uaShare: (ua.get(s) || 0) / uaTotal,
+    })).sort((a, b) => (b.ru + b.ua) - (a.ru + a.ua)),
+  };
+}
+
+function renderSegment(events) {
+  const { rows, ruTotal, uaTotal } = segmentRows(events);
+  const share = state.seg === 'share';
+  $('#seg-note').innerHTML = `${fmt(ruTotal)} events on Russian victims, ${fmt(uaTotal)} on ` +
+    `Ukrainian, of those with a known country and sector` +
+    (state.wdOnly ? ' <span class="src wd">P17 only</span>' : '');
+
+  const svg = d3.select('#segchart');
+  svg.selectAll('*').remove();
+  const top = rows.slice(0, 11);
+  const w = 600, rowH = 26, m = { t: 6, r: 50, b: 4, l: 146 };
+  const h = Math.max(70, top.length * rowH + m.t + m.b);
+  svg.attr('viewBox', `0 0 ${w} ${h}`);
+  if (!top.length) {
+    svg.append('text').attr('x', w / 2).attr('y', 34).attr('text-anchor', 'middle')
+      .text('no Russian or Ukrainian victims with a sector in this selection');
+    $('#segtable tbody').innerHTML =
+      '<tr><td colspan="4"><span class="src">nothing to compare</span></td></tr>';
+    return;
+  }
+  const val = (d, k) => (share ? d[k + 'Share'] : d[k]);
+  const x = d3.scaleLinear()
+    .domain([0, d3.max(top, (d) => Math.max(val(d, 'ru'), val(d, 'ua')))]).nice()
+    .range([m.l, w - m.r]);
+  const label = (v) => (share ? pct(v) : fmt(v));
+
+  const g = svg.append('g').selectAll('g').data(top).join('g')
+    .attr('transform', (d, i) => `translate(0,${m.t + i * rowH})`)
+    .style('cursor', 'pointer')
+    .on('click', (ev, d) => {
+      state.sector = state.sector === d.sector ? '' : d.sector;
+      $('#sector').value = state.sector;
+      state.page = 0;
+      render();
+    });
+
+  g.append('text').attr('x', m.l - 8).attr('y', rowH / 2 + 3).attr('text-anchor', 'end')
+    .attr('class', 'lbl-out')
+    .attr('font-weight', (d) => (d.sector === state.sector ? 700 : 500))
+    .attr('fill', (d) => (d.sector === state.sector ? css('--ua') : css('--ink-2')))
+    .text((d) => (d.sector.length > 22 ? d.sector.slice(0, 21) + '…' : d.sector));
+
+  // Two bars per sector with a 2px surface gap between them.
+  [['ru', 2, css('--ru')], ['ua', 12, css('--ua')]].forEach(([k, dy, colour]) => {
+    g.append('rect').attr('class', 'bar')
+      .attr('x', m.l).attr('y', dy).attr('height', 8).attr('rx', 2)
+      .attr('fill', colour)
+      .attr('width', (d) => Math.max(val(d, k) ? 1.5 : 0, x(val(d, k)) - m.l))
+      .on('pointermove', (ev, d) => showTip(
+        `<b>${esc(d.sector)}</b><br><span class="r">${
+          k === 'ru' ? 'Russian' : 'Ukrainian'} victims: ${label(val(d, k))}${
+          share ? ' of that country' : ' events'}</span>`, ev))
+      .on('pointerleave', hideTip);
+  });
+  g.append('text').attr('x', (d) => Math.max(x(val(d, 'ru')), x(val(d, 'ua'))) + 6)
+    .attr('y', rowH / 2 + 3).attr('class', 'lbl-out')
+    .text((d) => `${label(val(d, 'ru'))} / ${label(val(d, 'ua'))}`);
+
+  $('#segtable tbody').innerHTML = rows.map((d) => {
+    const skew = d.ruShare - d.uaShare;
+    const toward = skew > 0 ? 'Russia' : 'Ukraine';
+    return `<tr class="row" data-sector="${esc(d.sector)}">
+      <td>${esc(d.sector)}</td>
+      <td class="num">${fmt(d.ru)}</td>
+      <td class="num">${fmt(d.ua)}</td>
+      <td class="num" style="color:${skew > 0 ? 'var(--ru)' : 'var(--ua)'}"
+          title="share of that country's attacks, Russia minus Ukraine">
+        ${Math.abs(skew) < 0.005 ? 'even' : (skew > 0 ? '+' : '−') +
+          pct(Math.abs(skew)) + ' ' + toward}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4"><span class="src">nothing to compare</span></td></tr>';
+  $('#segtable tbody').querySelectorAll('tr[data-sector]').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      state.sector = state.sector === tr.dataset.sector ? '' : tr.dataset.sector;
+      $('#sector').value = state.sector;
+      state.page = 0;
+      render();
+    });
+  });
+}
+
+/* ---------- monthly series by side -------------------------------------- */
+function renderTime(events) {
+  const svg = d3.select('#time'), w = 960, h = 240;
+  const m = { t: 12, r: 14, b: 26, l: 42 };
+  svg.selectAll('*').remove();
+  if (!events.length) {
+    svg.append('text').attr('x', w / 2).attr('y', h / 2).attr('text-anchor', 'middle')
+      .text('no events in this selection');
+    return;
+  }
+  const key = d3.timeFormat('%Y-%m');
+  const counts = { ru: new Map(), ua: new Map(), none: new Map() };
+  for (const e of events) {
+    const mm = counts[e.side];
+    mm.set(e.f.slice(0, 7), (mm.get(e.f.slice(0, 7)) || 0) + 1);
+  }
+  const lo = d3.min(events, (e) => e.f), hi = d3.max(events, (e) => e.f);
+  const months = d3.timeMonths(d3.timeMonth.floor(new Date(lo)),
+    d3.timeMonth.offset(new Date(hi), 1));
+  const series = ['none', 'ru', 'ua'].map((side) => ({
+    side,
+    values: months.map((d) => ({ date: d, v: counts[side].get(key(d)) || 0 })),
+  }));
+
+  const x = d3.scaleTime().domain(d3.extent(months)).range([m.l, w - m.r]);
+  const y = d3.scaleLinear()
+    .domain([0, d3.max(series, (s) => d3.max(s.values, (d) => d.v)) || 1]).nice()
+    .range([h - m.b, m.t]);
+
+  svg.append('g').selectAll('line').data(y.ticks(4)).join('line')
+    .attr('class', 'gridline').attr('x1', m.l).attr('x2', w - m.r).attr('y1', y).attr('y2', y);
+  svg.append('g').selectAll('text').data(y.ticks(4)).join('text')
+    .attr('x', m.l - 6).attr('y', (d) => y(d) + 3).attr('text-anchor', 'end').text(fmt);
+  // One tick per year once the span is long enough, otherwise months - d3's own tick
+  // count would otherwise put several sub-year ticks under the same "2022" label.
+  const years = months.length / 12;
+  const ticks = years >= 2 ? x.ticks(d3.timeYear.every(years > 8 ? 2 : 1)) : x.ticks(6);
+  const tickFmt = years >= 2 ? d3.timeFormat('%Y') : d3.timeFormat('%b %Y');
+  svg.append('g').selectAll('text').data(ticks).join('text')
+    .attr('x', x).attr('y', h - 8).attr('text-anchor', 'middle').text(tickFmt);
+
+  const invasion = new Date(DATA.invasion);
+  if (invasion >= x.domain()[0] && invasion <= x.domain()[1]) {
+    svg.append('line').attr('class', 'warline')
+      .attr('x1', x(invasion)).attr('x2', x(invasion)).attr('y1', m.t).attr('y2', h - m.b);
+    svg.append('text').attr('x', x(invasion) + 5).attr('y', m.t + 9)
+      .attr('fill', css('--critical')).text('24 Feb 2022');
+  }
+
+  const line = d3.line().x((d) => x(d.date)).y((d) => y(d.v)).curve(d3.curveMonotoneX);
+  series.forEach((s) => {
+    svg.append('path').attr('d', line(s.values)).attr('fill', 'none')
+      .attr('stroke', sideColour(s.side))
+      .attr('stroke-width', s.side === 'none' ? 1.4 : 2)
+      .attr('opacity', s.side === 'none' ? .65 : 1);
+  });
+  svg.append('line').attr('class', 'axisline')
+    .attr('x1', m.l).attr('x2', w - m.r).attr('y1', y(0)).attr('y2', y(0));
+
+  const names = { ru: 'Russia-aligned', ua: 'Ukraine-aligned', none: 'Unaligned' };
+  const cross = svg.append('line').attr('class', 'axisline')
+    .attr('y1', m.t).attr('y2', h - m.b).attr('opacity', 0);
+  svg.append('rect').attr('x', m.l).attr('y', m.t)
+    .attr('width', Math.max(0, w - m.r - m.l)).attr('height', Math.max(0, h - m.b - m.t))
+    .attr('fill', 'transparent')
+    .on('pointermove', (ev) => {
+      const px = d3.pointer(ev, svg.node())[0], d = x.invert(px);
+      const i = d3.leastIndex(months, (mo) => Math.abs(mo - d));
+      if (i == null) return;
+      cross.attr('x1', x(months[i])).attr('x2', x(months[i])).attr('opacity', .9);
+      showTip(`<b>${d3.timeFormat('%B %Y')(months[i])}</b><br>` + series.map((s) =>
+        `<span class="r"><span class="sw" style="display:inline-block;width:8px;height:8px;` +
+        `border-radius:2px;background:${sideColour(s.side)}"></span> ${names[s.side]}: ${
+          fmt(s.values[i].v)}</span>`).join('<br>'), ev);
+    })
+    .on('pointerleave', () => { cross.attr('opacity', 0); hideTip(); });
+}
+
+/* ---------- actors ------------------------------------------------------ */
+function renderActors(events) {
+  const rows = tally(events, (e) => e.g).slice(0, 12);
+  const svg = d3.select('#actors');
+  svg.selectAll('*').remove();
+  const w = 600, rowH = 22, m = { t: 4, r: 48, b: 4, l: 188 };
+  const h = Math.max(70, rows.length * rowH + m.t + m.b);
+  svg.attr('viewBox', `0 0 ${w} ${h}`);
+
+  if (!rows.length) {
+    svg.append('text').attr('x', w / 2).attr('y', 34).attr('text-anchor', 'middle')
+      .text('no named actor in this selection');
+  } else {
+    const x = d3.scaleLinear().domain([0, d3.max(rows, (d) => d[1])]).range([m.l, w - m.r]);
+    const sideOfActor = (n) => {
+      const a = actorBy.get(n) || {};
+      return RU_SIDE.has(a.al) ? 'ru' : UA_SIDE.has(a.al) ? 'ua' : 'none';
+    };
+    const g = svg.append('g').selectAll('g').data(rows).join('g')
+      .attr('transform', (d, i) => `translate(0,${m.t + i * rowH})`)
+      .style('cursor', 'pointer')
+      .on('pointermove', (ev, d) => {
+        const a = actorBy.get(d[0]) || {};
+        showTip(`<b>${esc(d[0])}</b><br><span class="r">${esc(a.al || 'unaligned')} &middot; ${
+          fmt(d[1])} events</span>`, ev);
+      })
+      .on('pointerleave', hideTip)
+      .on('click', (ev, d) => selectActor(d[0]));
+
+    g.append('text').attr('x', m.l - 8).attr('y', rowH / 2 + 3).attr('text-anchor', 'end')
+      .attr('class', 'lbl-out')
+      .attr('font-weight', (d) => (d[0] === state.actor ? 700 : 500))
+      .text((d) => (d[0].length > 27 ? d[0].slice(0, 26) + '…' : d[0]));
+    g.append('rect').attr('class', 'bar')
+      .attr('x', m.l).attr('y', 3).attr('height', rowH - 9).attr('rx', 2)
+      .attr('width', (d) => Math.max(1.5, x(d[1]) - m.l))
+      .attr('fill', (d) => sideColour(sideOfActor(d[0])))
+      .attr('opacity', (d) => (!state.actor || d[0] === state.actor ? 1 : .45));
+    g.append('text').attr('x', (d) => x(d[1]) + 6).attr('y', rowH / 2 + 3)
+      .attr('class', 'lbl-out').text((d) => fmt(d[1]));
+  }
+  renderProfile(events, rows);
+}
+
+function selectActor(name) {
+  state.actor = state.actor === name ? '' : name;
+  $('#actor').value = state.actor;
+  state.sel = state.actor ? { kind: 'Actor', name: state.actor } : null;
+  state.page = 0;
+  render();
+}
+
+function renderProfile(events, topRows) {
+  const name = state.actor || (topRows[0] && topRows[0][0]);
+  const box = $('#profile');
+  if (!name) { box.innerHTML = '<p class="empty">No named actor in this selection.</p>'; return; }
+  const a = actorBy.get(name) || { al: 'unaligned' };
+  const mine = events.filter((e) => e.g.includes(name));
+  const side = RU_SIDE.has(a.al) ? 'ru' : UA_SIDE.has(a.al) ? 'ua' : 'none';
+  const sectors = tally(mine, (e) => [e.sec]).slice(0, 5);
+  const countries = tally(mine, (e) => [e.vc]).slice(0, 5);
+  const span = mine.length
+    ? `${d3.min(mine, (e) => e.f).slice(0, 7)} – ${d3.max(mine, (e) => e.f).slice(0, 7)}`
+    : '—';
+  const bars = (rows) => {
+    const max = d3.max(rows, (d) => d[1]) || 1;
+    return rows.map(([k, v]) => `
+      <div class="mini-row">
+        <span style="display:grid;grid-template-columns:1fr;min-width:0">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(k)}</span>
+          <span class="b" style="width:${(100 * v / max).toFixed(1)}%;background:${
+            sideColour(side)}"></span>
+        </span>
+        <span style="font-family:var(--mono);font-size:11.5px">${fmt(v)}</span>
+      </div>`).join('') || '<span class="src">none recorded</span>';
+  };
+  box.innerHTML = `
+    <div class="pname">${esc(name)}</div>
+    <div class="palign">
+      <span class="dot" style="background:${sideColour(side)}"></span>
+      ${esc(a.al)}${state.actor ? '' : ' <span class="src">busiest here</span>'}
+    </div>
+    ${a.note ? `<p class="pnote">${esc(a.note)}</p>` : ''}
+    <div class="pstats">
+      <div><div class="v">${fmt(mine.length)}</div><div class="k">Events</div></div>
+      <div><div class="v">${fmt(d3.sum(mine, (e) => e.n))}</div><div class="k">Stories</div></div>
+      <div><div class="v">${fmt(new Set(mine.map((e) => e.tn)).size)}</div><div class="k">Targets</div></div>
+    </div>
+    <div><div class="k" style="font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+      text-transform:uppercase;color:var(--ink-muted);margin-bottom:4px">Active</div>
+      <span style="font-family:var(--mono);font-size:12px">${span}</span></div>
+    <div><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+      text-transform:uppercase;color:var(--ink-muted);margin-bottom:4px">Top victim sectors</div>
+      <div class="mini">${bars(sectors)}</div></div>
+    <div><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+      text-transform:uppercase;color:var(--ink-muted);margin-bottom:4px">Top victim countries</div>
+      <div class="mini">${bars(countries)}</div></div>`;
+}
+
+/* ---------- event browser ----------------------------------------------- */
+function renderBrowser(events) {
+  const s = state.sel;
+  $('#browse-title').textContent = s ? `${s.kind}: ${s.name}` : 'Attack events';
+  $('#browse-note').textContent =
+    `${fmt(events.length)} events in the current filter · click a row for the full record`;
+
+  const { key, dir } = state.sort;
+  const sorted = events.slice().sort((a, b) => {
+    const va = a[key] ?? '', vb = b[key] ?? '';
+    return (va < vb ? -1 : va > vb ? 1 : 0) * dir || d3.descending(a.f, b.f);
+  });
+  const pages = Math.max(1, Math.ceil(sorted.length / PAGE));
+  state.page = Math.min(state.page, pages - 1);
+  const page = sorted.slice(state.page * PAGE, state.page * PAGE + PAGE);
+
+  document.querySelectorAll('#events th.sortable').forEach((th) => {
+    if (th.dataset.sort === key) th.setAttribute('aria-sort', dir < 0 ? 'descending' : 'ascending');
+    else th.removeAttribute('aria-sort');
+  });
+
+  $('#events tbody').innerHTML = page.map((e) => {
+    const open = state.open === e.id;
+    const actorChips = e.g.length
+      ? e.g.map((g) => {
+          const a = actorBy.get(g) || {};
+          const cls = RU_SIDE.has(a.al) ? 'ru' : UA_SIDE.has(a.al) ? 'ua' : '';
+          return `<span class="chip ${cls}" data-actor="${esc(g)}">${esc(g)}</span>`;
+        }).join('')
+      : '<span class="src">not attributed</span>';
+    const row = `
+      <tr class="row" data-id="${esc(e.id)}">
+        <td class="date">${esc(e.f)}</td>
+        <td>${esc(e.tn)}${e.tl === 'Person' ? ' <span class="src">person</span>' : ''}</td>
+        <td>${e.vc ? esc(e.vc) + ' <span class="src' + (e.vcs === 'wikidata' ? ' wd' : '') +
+          '">' + (e.vcs === 'wikidata' ? 'P17' : 'story') + '</span>' :
+          '<span class="src">unknown</span>'}</td>
+        <td>${e.sec ? esc(e.sec) : '<span class="src">—</span>'}</td>
+        <td>${actorChips}</td>
+        <td class="num">${fmt(e.n)}</td>
+      </tr>`;
+    if (!open) return row;
+    return row + `
+      <tr class="detail"><td colspan="6">
+        <div class="dl">
+          <div><dt>Event id</dt><dd>${esc(e.id)}</dd></div>
+          <div><dt>Reported</dt><dd>${esc(e.f)} to ${esc(e.l)} · ${fmt(e.n)} stories</dd></div>
+          <div><dt>Phase</dt><dd>${e.war ? 'since the invasion' : 'before the invasion'}</dd></div>
+          <div><dt>Actor side</dt><dd>${e.al.length ? esc(e.al.join(', ')) : 'not attributed'}</dd></div>
+          <div><dt>Sector source</dt><dd>${esc(e.ss || 'none')}</dd></div>
+          <div><dt>Country source</dt><dd>${esc(e.vcs || 'none')}</dd></div>
+          <div><dt>Locations in coverage</dt><dd>${e.co.length ? esc(e.co.join(', ')) : '—'}</dd></div>
+          <div><dt>Motives extracted</dt><dd>${e.m.length ? esc(e.m.join(', ')) : '—'}</dd></div>
+          <div><dt>Costs extracted</dt><dd>${e.c.length ? esc(e.c.join(', ')) : '—'}</dd></div>
+          <div style="grid-column:1/-1"><dt>Headline</dt><dd>${
+            e.u ? `<a href="${esc(e.u)}" target="_blank" rel="noopener">${
+              esc(e.t || e.u)}</a>` : esc(e.t || '—')}</dd></div>
+        </div>
+      </td></tr>`;
+  }).join('') || '<tr><td colspan="6"><span class="src">no events in this selection</span></td></tr>';
+
+  $('#events tbody').querySelectorAll('tr.row').forEach((tr) => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('a')) return;
+      const chip = ev.target.closest('.chip[data-actor]');
+      if (chip) { selectActor(chip.dataset.actor); return; }
+      state.open = state.open === tr.dataset.id ? null : tr.dataset.id;
+      renderBrowser(events);
+    });
+  });
+  $('#pageinfo').textContent =
+    `Page ${state.page + 1} of ${fmt(pages)} · showing ${fmt(page.length)} of ${fmt(sorted.length)}`;
+  $('#prev').disabled = state.page === 0;
+  $('#next').disabled = state.page >= pages - 1;
+
+  renderEgo(events);
+}
+
+/* ---------- actor/target graph ------------------------------------------ */
+let sim = null;
+function renderEgo(events) {
+  const svg = d3.select('#egograph'), w = 460, h = 300;
+  svg.selectAll('*').remove();
+  if (sim) sim.stop();
+
+  const pairs = new Map();
+  for (const e of events) for (const g of e.g) {
+    const k = g + '\u0000' + e.tn;
+    pairs.set(k, (pairs.get(k) || 0) + 1);
+  }
+  let links = [...pairs].map(([k, v]) => {
+    const [g, t] = k.split('\u0000');
+    return { source: g, target: t, v };
+  }).sort((a, b) => b.v - a.v).slice(0, 55);
+
+  if (!links.length) {
+    svg.append('text').attr('x', w / 2).attr('y', h / 2).attr('text-anchor', 'middle')
+      .text('no attributed actor in this selection');
+    $('#egokey').innerHTML = '';
+    return;
+  }
+  const deg = new Map();
+  links.forEach((l) => {
+    deg.set(l.source, (deg.get(l.source) || 0) + l.v);
+    deg.set(l.target, (deg.get(l.target) || 0) + l.v);
+  });
+  const isActor = new Set(links.map((l) => l.source));
+  const nodes = [...deg].map(([id, v]) => ({ id, v, actor: isActor.has(id) }));
+  const colourOf = (d) => {
+    if (!d.actor) return css('--neutral');
+    const a = actorBy.get(d.id) || {};
+    return sideColour(RU_SIDE.has(a.al) ? 'ru' : UA_SIDE.has(a.al) ? 'ua' : 'none');
+  };
+  const r = d3.scaleSqrt().domain([1, d3.max(nodes, (d) => d.v)]).range([4, 16]);
+  const lw = d3.scaleSqrt().domain([1, d3.max(links, (d) => d.v)]).range([1, 5]);
+
+  const link = svg.append('g').selectAll('line').data(links).join('line')
+    .attr('class', 'ego-link').attr('stroke-width', (d) => lw(d.v));
+  const dot = svg.append('g').selectAll('circle').data(nodes).join('circle')
+    .attr('class', 'ego-node').attr('r', (d) => r(d.v)).attr('fill', colourOf)
+    .on('pointermove', (ev, d) => showTip(
+      `<b>${esc(d.id)}</b><br><span class="r">${d.actor ? 'actor' : 'target'} &middot; ${
+        fmt(d.v)} events here</span>`, ev))
+    .on('pointerleave', hideTip)
+    .on('click', (ev, d) => {
+      if (d.actor) selectActor(d.id);
+      else { state.sel = { kind: 'Target', name: d.id }; state.q = d.id; $('#q').value = d.id; render(); }
+    });
+  const lbl = svg.append('g').selectAll('text').data(nodes.filter((d) => r(d.v) > 8)).join('text')
+    .attr('class', 'ego-lbl').attr('text-anchor', 'middle')
+    .text((d) => (d.id.length > 20 ? d.id.slice(0, 19) + '…' : d.id));
+
+  sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id((d) => d.id).distance(54).strength(.5))
+    .force('charge', d3.forceManyBody().strength(-180))
+    .force('center', d3.forceCenter(w / 2, h / 2))
+    .force('collide', d3.forceCollide((d) => r(d.v) + 7))
+    .on('tick', () => {
+      nodes.forEach((n) => {
+        n.x = Math.max(16, Math.min(w - 16, n.x));
+        n.y = Math.max(22, Math.min(h - 14, n.y));
+      });
+      link.attr('x1', (d) => d.source.x).attr('y1', (d) => d.source.y)
+        .attr('x2', (d) => d.target.x).attr('y2', (d) => d.target.y);
+      dot.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
+      lbl.attr('x', (d) => d.x).attr('y', (d) => d.y - r(d.v) - 4);
+    });
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    sim.stop();
+    for (let i = 0; i < 200; i++) sim.tick();
+    sim.dispatch('tick', {});
+  }
+
+  const pairsTop = links.slice(0, 8);
+  const max = d3.max(pairsTop, (d) => d.v) || 1;
+  $('#egokey').innerHTML =
+    '<div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;' +
+    'text-transform:uppercase;color:var(--ink-muted);margin-bottom:4px">Strongest actor-target links</div>' +
+    pairsTop.map((l) => {
+      const a = actorBy.get(l.source) || {};
+      const colour = sideColour(RU_SIDE.has(a.al) ? 'ru' : UA_SIDE.has(a.al) ? 'ua' : 'none');
+      const src = typeof l.source === 'object' ? l.source.id : l.source;
+      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+      return `<div class="mini-row">
+        <span style="display:grid;min-width:0">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${
+            esc(src)} → ${esc(tgt)}</span>
+          <span class="b" style="width:${(100 * l.v / max).toFixed(1)}%;background:${colour}"></span>
+        </span>
+        <span style="font-family:var(--mono);font-size:11.5px">${fmt(l.v)}</span>
+      </div>`;
+    }).join('');
+}
+
+/* ---------- controls ---------------------------------------------------- */
+function wire() {
+  const press = (sel, attr, apply) => {
+    $(sel).addEventListener('click', (ev) => {
+      const b = ev.target.closest(`button[data-${attr}]`);
+      if (!b) return;
+      apply(b.dataset[attr]);
+      $(sel).querySelectorAll('button').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+      render();
+    });
+  };
+  press('#mode', 'mode', (v) => { state.mode = v; });
+  press('#segmode', 'seg', (v) => { state.seg = v; });
+  press('#phase', 'phase', (v) => { state.phase = v; state.page = 0; });
+
+  $('#align').addEventListener('change', (e) => {
+    state.align = e.target.value; state.page = 0; render();
+  });
+  $('#sector').addEventListener('change', (e) => {
+    state.sector = e.target.value; state.page = 0; render();
+  });
+  $('#actor').addEventListener('change', (e) => {
+    state.actor = e.target.value;
+    state.sel = state.actor ? { kind: 'Actor', name: state.actor } : null;
+    state.page = 0;
+    render();
+  });
+  $('#wd').addEventListener('change', (e) => {
+    state.wdOnly = e.target.checked; state.page = 0; render();
+  });
+  let t;
+  $('#q').addEventListener('input', (e) => {
+    clearTimeout(t);
+    t = setTimeout(() => { state.q = e.target.value; state.page = 0; render(); }, 180);
+  });
+  $('#prev').addEventListener('click', () => { state.page--; render(); });
+  $('#next').addEventListener('click', () => { state.page++; render(); });
+  document.querySelectorAll('#events th.sortable').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.sort;
+      state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : -1 };
+      state.page = 0;
+      render();
+    });
+  });
+  $('#reset').addEventListener('click', () => {
+    Object.assign(state, {
+      phase: 'war', align: '', sector: '', actor: '', country: '',
+      wdOnly: false, q: '', sel: null, page: 0, open: null,
+      sort: { key: 'f', dir: -1 },
+    });
+    $('#align').value = ''; $('#sector').value = ''; $('#actor').value = '';
+    $('#wd').checked = false; $('#q').value = '';
+    $('#phase').querySelectorAll('button').forEach((b) =>
+      b.setAttribute('aria-pressed', String(b.dataset.phase === 'war')));
+    render();
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    SEQ = SEQ_VARS.map(css);
+    render();
+  });
+}
+</script>
